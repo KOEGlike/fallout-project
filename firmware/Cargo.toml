@@ -1,0 +1,40 @@
+[package]
+name = "firmware"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Embassy
+embassy-executor = { version = "0.10" }
+embassy-sync = { version = "0.8" }
+embassy-time = { version = "0.5" }
+embassy-net = { version = "0.9", features = ["dhcpv4", "dns", "tcp", "udp"] }
+
+# ESP specifics
+esp-hal = { version = "1", features = ["esp32c3", "unstable", "rt", "exception-handler", "log-04"] }
+esp-backtrace = { version = "0.19", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "0.17", features = ["esp32c3", "log-04", "auto", "colors", "critical-section"] }
+esp-radio = { version = "0.18", features = ["esp32c3", "wifi", "esp-alloc", "log-04"] }
+esp-rtos = { version = "0.3", features = ["esp32c3", "esp-radio", "embassy"] }
+esp-alloc = { version = "0.10" }
+
+# Static objects
+static_cell = { version = "2" }
+
+# Heapless data types
+heapless = { version = "0.9" }
+
+# Time
+time = { version = "0.3" }
+
+# HTTP
+reqwless = { workspace = true, features = ["alloc", "embedded-tls", "log"] }
+
+# Random
+rand_core = { workspace = true }
+
+# JSON
+microjson = { workspace = true}
+
+# Display
+mipidsi = { version = "" }
