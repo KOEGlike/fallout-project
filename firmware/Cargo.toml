@@ -20,6 +20,7 @@ esp-println = { version = "0.17", features = ["esp32c3", "log-04", "auto", "colo
 esp-radio = { version = "0.18", features = ["esp32c3", "wifi", "esp-alloc", "log-04"] }
 esp-rtos = { version = "0.3", features = ["esp32c3", "esp-radio", "embassy"] }
 esp-alloc = { version = "0.10" }
+esp-bootloader-esp-idf = { version = "0.5", features = ["esp32c3"] }
 
 # Static objects
 static_cell = { version = "2" }

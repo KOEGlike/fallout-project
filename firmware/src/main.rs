@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
 
+mod state_cell;
+
 extern crate alloc;
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel};
-use embassy_time::{Delay, Timer};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_time::{Delay, Instant, Timer};
 use embedded_graphics::{
     Drawable,
     draw_target::{DrawTarget, DrawTargetExt},
@@ -29,12 +31,17 @@ use esp_hal::{
     time::Rate,
     timer::timg::TimerGroup,
 };
-use loadcell::hx711::HX711;
-use log::error;
+use loadcell::{LoadCell, hx711::HX711};
+use log::{error, info};
 use tinyqoi::Qoi;
+use ws2812_timer_delay as ws2812;
 
 /// Size of heap for dynamically-allocated memory
 const HEAP_MEMORY_SIZE: usize = 72 * 1024;
+
+static CHANNEL: Channel<CriticalSectionRawMutex, AppState, 3> = Channel::new();
+
+esp_bootloader_esp_idf::esp_app_desc!();
 
 /// Main task
 #[esp_rtos::main]
@@ -49,13 +56,15 @@ async fn main(spawner: Spawner) {
     let sw_int = SoftwareInterruptControl::new(p.SW_INTERRUPT);
     esp_rtos::start(timg1.timer0, sw_int.software_interrupt0);
 
+    info!("started");
+
     // Display pins (ST7735s on a sensible default ESP32-C3 pinout):
     //   SCK  = GPIO4   MOSI = GPIO5
     //   CS   = GPIO6   (software CS via ExclusiveDevice)
     //   DC   = GPIO2   RST  = GPIO7
-    let cs = Output::new(p.GPIO6, Level::High, OutputConfig::default());
-    let dc = Output::new(p.GPIO2, Level::Low, OutputConfig::default());
-    let rst = Output::new(p.GPIO7, Level::High, OutputConfig::default());
+    let cs = Output::new(p.GPIO21, Level::High, OutputConfig::default());
+    let dc = Output::new(p.GPIO20, Level::Low, OutputConfig::default());
+    let rst = Output::new(p.GPIO9, Level::High, OutputConfig::default());
 
     // SPI2 is the only general-purpose SPI master on the ESP32-C3.
     // 10 MHz, Mode 0, MSB-first (default) - safe for ST7735s write.
@@ -66,27 +75,32 @@ async fn main(spawner: Spawner) {
             .with_mode(Mode::_0),
     )
     .expect("SPI2 config")
-    .with_sck(p.GPIO4)
-    .with_mosi(p.GPIO5);
+    .with_sck(p.GPIO8)
+    .with_mosi(p.GPIO10);
 
-    let channel = Channel::<NoopRawMutex, AppState, 3>::new();
+    let channel = &CHANNEL;
 
     spawner.spawn(display_task(spi, cs, dc, rst, channel).expect("spawn display_task"));
 
-    let loadcell = HX711::new(
-        Output::new(p.GPIO15, Level::Low, OutputConfig::default()),
-        Input::new(p.GPIO21, InputConfig::default()),
+    let mut loadcell = HX711::new(
+        Output::new(p.GPIO2, Level::Low, OutputConfig::default()),
+        Input::new(p.GPIO3, InputConfig::default()),
         Delay,
     );
 
-    let buttons = Buttons {
-        btn0: Input::new(p.GPIO9, InputConfig::default()),
-        btn1: Input::new(p.GPIO10, InputConfig::default()),
-        btn2: Input::new(p.GPIO11, InputConfig::default()),
-        btn3: Input::new(p.GPIO12, InputConfig::default()),
-    };
+    loop {
+        info!("Loadcell: {:#?}", loadcell.read());
+        Timer::after_millis(200).await;
+    }
 
-    spawner.spawn(logic_task(loadcell, buttons).expect("spawn logic_task"));
+    // let buttons = Buttons {
+    //     btn0: Input::new(p.GPIO9, InputConfig::default()),
+    //     btn1: Input::new(p.GPIO10, InputConfig::default()),
+    //     btn2: Input::new(p.GPIO11, InputConfig::default()),
+    //     btn3: Input::new(p.GPIO12, InputConfig::default()),
+    // };
+
+    // spawner.spawn(logic_task(channel, loadcell, buttons).expect("spawn logic_task"));
 }
 
 struct Buttons {
@@ -98,7 +112,7 @@ struct Buttons {
 
 #[embassy_executor::task]
 async fn logic_task(
-    channel: Channel<NoopRawMutex, AppState, 3>,
+    channel: &'static Channel<CriticalSectionRawMutex, AppState, 3>,
     loadcell: HX711<Output<'static>, Input<'static>, Delay>,
     mut buttons: Buttons,
 ) {
@@ -117,7 +131,7 @@ async fn logic_task(
 }
 
 #[embassy_executor::task]
-async fn
+async fn rand_btn() {}
 
 #[embassy_executor::task]
 async fn display_task(
@@ -125,12 +139,13 @@ async fn display_task(
     cs: Output<'static>,
     dc: Output<'static>,
     rst: Output<'static>,
-    channel: Channel<NoopRawMutex, AppState, 3>,
+    channel: &'static Channel<CriticalSectionRawMutex, AppState, 3>,
 ) {
-    let soup_sad = Qoi::new(include_bytes!("../images/sad.qoi")).unwrap();
-    let soup_angry = Qoi::new(include_bytes!("../images/angry.qoi")).unwrap();
-    let soup_neutral = Qoi::new(include_bytes!("../images/neutral.qoi")).unwrap();
-    let soup_sign = Qoi::new(include_bytes!("../images/sign.qoi")).unwrap();
+    // let soup_sad = Qoi::new(include_bytes!("../images/sad.qoi")).unwrap();
+    // let soup_angry = Qoi::new(include_bytes!("../images/angry.qoi")).unwrap();
+    // let soup_neutral = Qoi::new(include_bytes!("../images/neutral.qoi")).unwrap();
+    // let soup_sign = Qoi::new(include_bytes!("../images/sign.qoi")).unwrap();
+    let dice = Qoi::new(include_bytes!("../images/dice.qoi")).unwrap();
 
     let mut buffer = [0u8; 512];
     // Wrap the SpiBus + CS pin into a SpiDevice (mipidsi requires SpiDevice).
@@ -150,17 +165,19 @@ async fn display_task(
         }
     };
 
+    channel.send(AppState::Start).await;
+
     loop {
         let state = channel.receive().await;
 
         match state {
             AppState::Start => {
-                if let Err(e) = display.clear(Rgb565::WHITE) {
+                if let Err(e) = display.clear(Rgb565::RED) {
                     error!("clear failed: {e:?}");
                     continue;
                 }
 
-                let image = Image::new(&soup_sign, Point::new(0, 0));
+                let image = Image::new(&dice, Point::new(-64, -80));
                 if let Err(e) = image.draw(&mut display.color_converted()) {
                     error!("draw failed: {e:?}");
                     continue;
