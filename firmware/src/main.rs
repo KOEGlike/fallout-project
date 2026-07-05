@@ -30,6 +30,7 @@ use esp_hal::{
     clock::CpuClock,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
     interrupt::software::SoftwareInterruptControl,
+    rng::Rng,
     spi::{
         Mode,
         master::{Config, Spi},
@@ -180,11 +181,18 @@ async fn display_task(
 
     let mut receiver = state.subscriber().expect("state subscriber");
 
+    let mut rng = Rng::new();
+
     state.set(AppState::Rules).await;
     loop {
         let app_state = receiver.changed().await;
 
-        let sky = Image::new(&sky, Point::new(-10, 0));
+        let sky_image = if rng.random() % 100 < 33 {
+            &sky_seal
+        } else {
+            &sky
+        };
+        let sky = Image::new(sky_image, Point::new(-10, 0));
         if let Err(e) = sky.draw(&mut display.color_converted()) {
             error!("draw failed: {e:?}");
             continue;
