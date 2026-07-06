@@ -10,6 +10,7 @@ use esp_hal::{
     rng::Rng,
 };
 use loadcell::{LoadCell, hx711::HX711};
+use log::info;
 
 use crate::state::AppState;
 use crate::state_cell::StateCell;
@@ -105,6 +106,8 @@ pub async fn loadcell_task(
                 continue;
             }
         };
+
+        info!("readin {:#?}", reading);
 
         let in_zone = reading >= ss_min && reading <= ss_max;
 

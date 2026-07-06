@@ -12,19 +12,14 @@ use embedded_graphics::{
     text::Text,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
-use esp_hal::{
-    Blocking,
-    gpio::Output,
-    rng::Rng,
-    spi::master::Spi,
-};
+use esp_hal::{Blocking, gpio::Output, rng::Rng, spi::master::Spi};
 use log::error;
 use mipidsi::{Builder, interface::SpiInterface, models::ST7735s, options::Orientation};
 use tinyqoi::Qoi;
 
-use crate::sweet_spot::SWEET_SPOT_HOLD_MS;
 use crate::state::{AppState, SoupStatus};
 use crate::state_cell::StateCell;
+use crate::sweet_spot::SWEET_SPOT_HOLD_MS;
 
 const TEXT_STYLE: MonoTextStyle<'_, Rgb565> = MonoTextStyle::new(&FONT_8X13, Rgb565::BLACK);
 
@@ -61,7 +56,11 @@ fn draw_bar<D: DrawTarget<Color = Rgb565>>(
         .into_styled(outline_style)
         .draw(target)?;
 
-    let fill_w = if max == 0 { 0 } else { (value as u64 * (w - 2) as u64 / max as u64) as u32 };
+    let fill_w = if max == 0 {
+        0
+    } else {
+        (value as u64 * (w - 2) as u64 / max as u64) as u32
+    };
     if fill_w > 0 {
         let fill_style = PrimitiveStyle::with_fill(fill);
         Rectangle::new(Point::new(x + 1, y + 1), Size::new(fill_w, h - 2))
@@ -108,7 +107,7 @@ fn draw_force_meter<D: DrawTarget<Color = Rgb565>>(
     // Current force marker (red vertical line, 2px wide).
     let marker_x = FORCE_METER_X
         + ((reading.max(0) as i64 * FORCE_METER_W as i64 / FORCE_MAX) as i32)
-        .clamp(FORCE_METER_X, FORCE_METER_X + FORCE_METER_W as i32 - 2);
+            .clamp(FORCE_METER_X, FORCE_METER_X + FORCE_METER_W as i32 - 2);
     Rectangle::new(
         Point::new(marker_x, FORCE_METER_Y),
         Size::new(2, FORCE_METER_H),
@@ -164,7 +163,17 @@ pub async fn display_task(
 
     let rng = Rng::new();
 
-    state.set(AppState::Start).await;
+    state
+        .set(AppState::Game {
+            soup_hp: 100,
+            player_hp: 100,
+            soup_status: SoupStatus::Neutral,
+            sweet_spot_min: 0,
+            sweet_spot_max: 0,
+            sweet_spot_progress: 0,
+            loadcell_reading: 0,
+        })
+        .await;
     loop {
         let app_state = receiver.changed().await;
 
@@ -196,7 +205,7 @@ pub async fn display_task(
             }
             AppState::Rules => {
                 let rules_text = Text::new(
-                    "Rules:\n-Press soup, be in\nthe green zone to\nattack soup\n-Press the buttons\nwhen to the LEDs\nlight up to protect\nyourself",
+                    "Rules:\n-Press soup, be in\nthe green zone to\nattack soup\n-Press the buttons\nwhen the LEDs\nlight up to protect\nyourself",
                     Point::new(5, 35),
                     TEXT_STYLE,
                 );

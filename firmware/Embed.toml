@@ -1,0 +1,9 @@
+[default.general]
+chip = "esp32c3"
+protocol = "Jtag"
+
+[default.rtt]
+enabled = true
+
+[default.gdb]
+enabled = false

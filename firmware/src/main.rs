@@ -74,7 +74,7 @@ async fn main(spawner: Spawner) {
     // being low at reset forces the chip into ROM download mode.
     let cs = Output::new(p.GPIO21, Level::High, OutputConfig::default());
     let dc = Output::new(p.GPIO20, Level::Low, OutputConfig::default());
-    let rst = Output::new(p.GPIO1, Level::High, OutputConfig::default());
+    let rst = Output::new(p.GPIO9, Level::High, OutputConfig::default());
 
     // SPI2 is the only general-purpose SPI master on the ESP32-C3.
     // 10 MHz, Mode 0, MSB-first (default) - safe for ST7735s write.
