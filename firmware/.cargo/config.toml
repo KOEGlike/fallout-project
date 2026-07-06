@@ -3,7 +3,7 @@ target = "riscv32imc-unknown-none-elf"
 rustflags = []
 
 [target.riscv32imc-unknown-none-elf]
-runner = runner = 'probe-rs run --chip <chip-name>'
+runner = "espflash flash --port /dev/tty.usbmodem101 --monitor --ignore-app-descriptor"
 
-# [alias]
-# flash = "run --release"
+[alias]
+flash = "run --release"

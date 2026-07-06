@@ -7,12 +7,11 @@ mod game;
 mod state;
 mod state_cell;
 mod sweet_spot;
-mod ws2812_impl;
 
 extern crate alloc;
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_time::Delay;
+
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
 use esp_hal::{
@@ -26,17 +25,14 @@ use esp_hal::{
     time::Rate,
     timer::timg::TimerGroup,
 };
-use loadcell::hx711::HX711;
 use log::info;
 use state_cell::StateCell;
 
-use buttons::{Buttons, button_task};
+use buttons::{ButtonLeds, Buttons, button_task};
 use display::display_task;
 use game::logic_task;
 use state::AppState;
-use sweet_spot::loadcell_task;
-use ws2812_impl::{WS2812_TICKS, Ws2812Pin, Ws2812Timer};
-use ws2812_timer_delay as ws2812;
+use sweet_spot::{Hx711, loadcell_task};
 
 /// Size of heap for dynamically-allocated memory
 const HEAP_MEMORY_SIZE: usize = 72 * 1024;
@@ -57,12 +53,6 @@ async fn main(spawner: Spawner) {
     let timg1 = TimerGroup::new(p.TIMG1);
     let sw_int = SoftwareInterruptControl::new(p.SW_INTERRUPT);
     esp_rtos::start(timg1.timer0, sw_int.software_interrupt0);
-
-    // TIMG0 drives the WS2812 bit-bang timer (timer0 @ ~3 MHz). Its watchdog
-    // is not used, so disable it to prevent spurious resets while we bang on
-    // timer0's registers directly.
-    let mut timg0 = TimerGroup::new(p.TIMG0);
-    timg0.wdt.disable();
 
     info!("started");
 
@@ -92,27 +82,27 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(display_task(spi, cs, dc, rst, state).expect("spawn display_task"));
 
-    // WS2812 strip: 4 LEDs on GPIO18, paced by TIMG0 timer0 ticking at
-    // ~3 MHz (40 MHz APB / 2 / 13 ticks).
-    let ws_timer = Ws2812Timer::new(WS2812_TICKS);
-    let ws_pin = Ws2812Pin(Output::new(p.GPIO18, Level::Low, OutputConfig::default()));
-    let leds = ws2812::Ws2812::new(ws_timer, ws_pin);
+    // Two normal active-high reaction LEDs. The LED positive/anode side is
+    // connected to the ESP GPIO; the other side should go to ground through a
+    // current-limiting resistor.
+    let leds = ButtonLeds {
+        led0: Output::new(p.GPIO4, Level::Low, OutputConfig::default()),
+        led1: Output::new(p.GPIO7, Level::Low, OutputConfig::default()),
+    };
+    info!("reaction LEDs: GPIO4 and GPIO7 active-high");
 
-    // Four reaction buttons, each mapped to one LED. Pulled up so that an
+    // Two reaction buttons, each mapped to one LED. Pulled up so that an
     // external button to ground reads as `Level::Low` when pressed.
     let buttons = Buttons {
-        btn0: Input::new(p.GPIO4, InputConfig::default().with_pull(Pull::Up)),
-        btn1: Input::new(p.GPIO5, InputConfig::default().with_pull(Pull::Up)),
-        btn2: Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::Up)),
-        btn3: Input::new(p.GPIO7, InputConfig::default().with_pull(Pull::Up)),
+        btn0: Input::new(p.GPIO5, InputConfig::default().with_pull(Pull::Up)),
+        btn1: Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::Up)),
     };
 
     // HX711 load cell: SCK = GPIO2, DT = GPIO3. Used for the sweet-spot
     // hold-to-attack mechanic.
-    let loadcell = HX711::new(
+    let loadcell = Hx711::new(
         Output::new(p.GPIO2, Level::Low, OutputConfig::default()),
-        Input::new(p.GPIO3, InputConfig::default()),
-        Delay,
+        Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up)),
     );
 
     spawner.spawn(button_task(state, leds, buttons).expect("spawn button_task"));

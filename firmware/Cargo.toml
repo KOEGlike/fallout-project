@@ -42,14 +42,13 @@ mipidsi = { version = "0.10" }
 embedded-graphics = { version = "0.8.2" }
 tinyqoi = "0.2.0"
 
-loadcell = "0.3.0"
-ws2812-timer-delay = "0.3.0"
+critical-section = "1"
 
-# ws2812 support: the timer-delay driver is built on the embedded-hal 0.2 traits,
-# so we need those (renamed to avoid clashing with the 1.0 traits esp-hal uses),
-# plus `nb`, `void` (for the `CountDown::wait` signature) and `smart-leds-trait`
-# (for the `RGB8` color type the driver consumes).
-embedded-hal-02 = { version = "0.2", package = "embedded-hal", default-features = false }
-nb = "0.1"
-void = { version = "1", default-features = false }
-smart-leds-trait = "0.2"
+# ESP GPIO bit-banging is timing-sensitive. Unoptimized dev builds can hold
+# HX711 SCK high long enough to power the chip down mid-read, producing bogus
+# saturated values like 8388607.
+[profile.dev]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 3

@@ -1065,12 +1065,12 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 name = "firmware"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embassy-executor",
  "embassy-net",
  "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-graphics",
- "embedded-hal 0.2.7",
  "embedded-hal-bus",
  "esp-alloc",
  "esp-backtrace",
@@ -1080,17 +1080,12 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "heapless 0.9.3",
- "loadcell",
  "log",
  "mipidsi",
- "nb 0.1.3",
  "rand_core 0.10.1",
- "smart-leds-trait",
  "static_cell",
  "time",
  "tinyqoi",
- "void",
- "ws2812-timer-delay",
 ]
 
 [[package]]
@@ -1310,16 +1305,6 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
-
-[[package]]
-name = "loadcell"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a28f12fbad9a1fbc006aa4c1d11865f5e213e311b85735e21cf7ea4dea8f8e30"
-dependencies = [
- "critical-section",
- "embedded-hal 1.0.0",
-]
 
 [[package]]
 name = "log"
@@ -1551,15 +1536,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "rgb"
-version = "0.8.53"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "riscv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1712,15 +1688,6 @@ name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
-
-[[package]]
-name = "smart-leds-trait"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebf6d833fa93f16a1c1874e62c2aebe8567e5bdd436d59bf543ed258b6f7a8e3"
-dependencies = [
- "rgb",
-]
 
 [[package]]
 name = "smoltcp"
@@ -2077,17 +2044,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "ws2812-timer-delay"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9b339c25c6d44131844c4c5ac0c7344d32080daaa38a6e9beaba927cbe28800"
-dependencies = [
- "embedded-hal 0.2.7",
- "nb 0.1.3",
- "smart-leds-trait",
 ]
 
 [[package]]

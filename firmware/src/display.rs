@@ -1,7 +1,6 @@
 use embassy_executor;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time::Delay;
-use core::fmt::Write;
 use embedded_graphics::{
     Drawable,
     draw_target::{DrawTarget, DrawTargetExt},
@@ -13,13 +12,7 @@ use embedded_graphics::{
     text::Text,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
-use heapless::String;
-use esp_hal::{
-    Blocking,
-    gpio::Output,
-    rng::Rng,
-    spi::master::Spi,
-};
+use esp_hal::{Blocking, gpio::Output, rng::Rng, spi::master::Spi};
 use log::error;
 use mipidsi::{Builder, interface::SpiInterface, models::ST7735s, options::Orientation};
 use tinyqoi::Qoi;
@@ -31,22 +24,22 @@ use crate::sweet_spot::SWEET_SPOT_HOLD_MS;
 const TEXT_STYLE: MonoTextStyle<'_, Rgb565> = MonoTextStyle::new(&FONT_8X13, Rgb565::BLACK);
 
 // --- UI layout (screen is 160x128 after 270° rotation) ---
-const HP_BAR_X: i32 = 5;
-const HP_BAR_W: u32 = 150;
-const HP_BAR_H: u32 = 7;
-const SOUP_HP_Y: i32 = 1;
-const PLAYER_HP_Y: i32 = 10;
-const PROGRESS_Y: i32 = 20;
+const HUD_BAR_Y: i32 = 50;
+const HUD_BAR_W: u32 = 8;
+const HUD_BAR_H: u32 = 70;
+const SOUP_HP_X: i32 = 130;
+const PLAYER_HP_X: i32 = 120;
+const PROGRESS_X: i32 = 110;
 
-const FORCE_METER_X: i32 = 75;
+const FORCE_METER_X: i32 = 145;
 const FORCE_METER_Y: i32 = 50;
-const FORCE_METER_W: u32 = 80;
-const FORCE_METER_H: u32 = 20;
+const FORCE_METER_W: u32 = 12;
+const FORCE_METER_H: u32 = 70;
 const FORCE_MAX: i64 = 1_100_000;
 
-/// Draw a horizontal bar (health bar or progress bar) at `(x, y)` with width
-/// `w` and height `h`. `value`/`max` determines the fill proportion; `fill` and
-/// `outline` set the colors. Draws directly to `target` via `color_converted`.
+/// Draw a vertical bar (health bar or progress bar) at `(x, y)` with width
+/// `w` and height `h`. `value`/`max` determines the bottom-up fill proportion;
+/// `fill` and `outline` set the colors.
 fn draw_bar<D: DrawTarget<Color = Rgb565>>(
     target: &mut D,
     x: i32,
@@ -58,66 +51,84 @@ fn draw_bar<D: DrawTarget<Color = Rgb565>>(
     fill: Rgb565,
     outline: Rgb565,
 ) -> Result<(), D::Error> {
-    let outline_style = PrimitiveStyle::with_stroke(outline, 1);
-    Rectangle::new(Point::new(x, y), Size::new(w, h))
-        .into_styled(outline_style)
+    let bounds = Rectangle::new(Point::new(x, y), Size::new(w, h));
+    bounds
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(target)?;
+    bounds
+        .into_styled(PrimitiveStyle::with_stroke(outline, 1))
         .draw(target)?;
 
-    let fill_w = if max == 0 {
+    let inner_w = w.saturating_sub(2);
+    let inner_h = h.saturating_sub(2);
+    let fill_h = if max == 0 {
         0
     } else {
-        (value as u64 * (w - 2) as u64 / max as u64) as u32
+        (value.min(max) as u64 * inner_h as u64 / max as u64) as u32
     };
-    if fill_w > 0 {
+    if inner_w > 0 && fill_h > 0 {
+        let fill_y = y + h as i32 - 1 - fill_h as i32;
         let fill_style = PrimitiveStyle::with_fill(fill);
-        Rectangle::new(Point::new(x + 1, y + 1), Size::new(fill_w, h - 2))
+        Rectangle::new(Point::new(x + 1, fill_y), Size::new(inner_w, fill_h))
             .into_styled(fill_style)
             .draw(target)?;
     }
     Ok(())
 }
 
-/// Draw the sweet-spot force meter: a horizontal track with the target zone
-/// (green band) and the current force reading (red marker line).
+/// Draw the sweet-spot force meter: a vertical track with the target zone
+/// (green band) and the current force reading (red horizontal marker line).
 fn draw_force_meter<D: DrawTarget<Color = Rgb565>>(
     target: &mut D,
     reading: i32,
     zone_min: i32,
     zone_max: i32,
 ) -> Result<(), D::Error> {
-    // Track outline.
+    // Track background + outline. Filling the track clears the previous marker
+    // without redrawing the whole screen.
     let track = Rectangle::new(
         Point::new(FORCE_METER_X, FORCE_METER_Y),
         Size::new(FORCE_METER_W, FORCE_METER_H),
     );
     track
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(target)?;
+    track
         .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
         .draw(target)?;
 
+    let inner_h = FORCE_METER_H as i32 - 2;
+    let meter_bottom = FORCE_METER_Y + FORCE_METER_H as i32 - 2;
+    let value_to_y = |value: i32| {
+        let value = value.clamp(0, FORCE_MAX as i32) as i64;
+        let offset = if inner_h <= 1 {
+            0
+        } else {
+            (value * (inner_h - 1) as i64 / FORCE_MAX) as i32
+        };
+        meter_bottom - offset
+    };
+
     // Sweet-spot zone band (green), clamped to meter bounds.
-    let zone_x_min =
-        FORCE_METER_X + ((zone_min.max(0) as i64 * FORCE_METER_W as i64 / FORCE_MAX) as i32);
-    let zone_x_max =
-        FORCE_METER_X + ((zone_max.max(0) as i64 * FORCE_METER_W as i64 / FORCE_MAX) as i32);
-    let zone_x_start = zone_x_min.max(FORCE_METER_X + 1);
-    let zone_x_end = zone_x_max.min(FORCE_METER_X + FORCE_METER_W as i32 - 1);
-    if zone_x_end > zone_x_start {
-        let zone_w = (zone_x_end - zone_x_start) as u32;
+    let zone_y_low = value_to_y(zone_min);
+    let zone_y_high = value_to_y(zone_max);
+    let zone_y_start = zone_y_high.min(zone_y_low).max(FORCE_METER_Y + 1);
+    let zone_y_end = zone_y_high.max(zone_y_low).min(meter_bottom);
+    if zone_y_end >= zone_y_start {
+        let zone_h = (zone_y_end - zone_y_start + 1) as u32;
         Rectangle::new(
-            Point::new(zone_x_start, FORCE_METER_Y + 1),
-            Size::new(zone_w, FORCE_METER_H - 2),
+            Point::new(FORCE_METER_X + 1, zone_y_start),
+            Size::new(FORCE_METER_W - 2, zone_h),
         )
         .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
         .draw(target)?;
     }
 
-    // Current force marker (red vertical line, 2px wide).
-    let marker_x = FORCE_METER_X
-        + ((reading.max(0) as i64 * FORCE_METER_W as i64 / FORCE_MAX) as i32)
-            .clamp(FORCE_METER_X, FORCE_METER_X + FORCE_METER_W as i32 - 2);
+    // Current force marker (red horizontal line, 2px tall).
+    let marker_y = value_to_y(reading).clamp(FORCE_METER_Y + 1, meter_bottom);
     Rectangle::new(
-        Point::new(marker_x, FORCE_METER_Y),
-        Size::new(2, FORCE_METER_H),
+        Point::new(FORCE_METER_X, marker_y),
+        Size::new(FORCE_METER_W, 2),
     )
     .into_styled(PrimitiveStyle::with_fill(Rgb565::RED))
     .draw(target)?;
@@ -170,10 +181,8 @@ pub async fn display_task(
 
     let rng = Rng::new();
 
-    state.set(AppState::Start).await;
-
-    let mut sky_seal_mode = rng.random() % 100 < 33;
-    let mut last_variant = 0u8;
+    let mut last_variant = u8::MAX;
+    let mut last_soup_status: Option<SoupStatus> = None;
 
     loop {
         let app_state = receiver.changed().await;
@@ -184,17 +193,29 @@ pub async fn display_task(
             AppState::Game { .. } => 2,
             AppState::EndScreen { .. } => 3,
         };
-        if current_variant != last_variant {
+        let current_soup_status = match &app_state {
+            AppState::Game { soup_status, .. } => Some(*soup_status),
+            AppState::EndScreen { player_won } => Some(if *player_won {
+                SoupStatus::Angry
+            } else {
+                SoupStatus::Neutral
+            }),
+            _ => None,
+        };
+        let full_redraw = current_variant != last_variant;
+        let soup_redraw = full_redraw || current_soup_status != last_soup_status;
+        if full_redraw {
             last_variant = current_variant;
-            sky_seal_mode = rng.random() % 100 < 33;
-        }
+            let sky_seal_mode = rng.random() % 100 < 33;
 
-        let sky_image = if sky_seal_mode { &sky_seal } else { &sky };
-        let sky = Image::new(sky_image, Point::new(-10, 0));
-        if let Err(e) = sky.draw(&mut display.color_converted()) {
-            error!("draw failed: {e:?}");
-            continue;
+            let sky_image = if sky_seal_mode { &sky_seal } else { &sky };
+            let sky = Image::new(sky_image, Point::new(-10, 0));
+            if let Err(e) = sky.draw(&mut display.color_converted()) {
+                error!("draw failed: {e:?}");
+                continue;
+            }
         }
+        last_soup_status = current_soup_status;
 
         match app_state {
             AppState::Start => {
@@ -232,27 +253,31 @@ pub async fn display_task(
                 loadcell_reading,
                 ..
             } => {
-                // Soup image (bottom-left).
-                let soup_image = match soup_status {
-                    SoupStatus::Angry => &soup_angry,
-                    SoupStatus::Sad => &soup_sad,
-                    SoupStatus::Neutral => &soup_neutral,
-                };
-                let soup_image = Image::new(soup_image, soup_offset);
-                if let Err(e) = soup_image.draw(&mut display.color_converted()) {
-                    error!("draw failed: {e:?}");
-                    continue;
+                // Static game art only needs a full redraw when entering the game
+                // screen. Live load-cell updates redraw only the HUD widgets below
+                // to avoid full-screen flicker.
+                if soup_redraw {
+                    let soup_image = match soup_status {
+                        SoupStatus::Angry => &soup_angry,
+                        SoupStatus::Sad => &soup_sad,
+                        SoupStatus::Neutral => &soup_neutral,
+                    };
+                    let soup_image = Image::new(soup_image, soup_offset);
+                    if let Err(e) = soup_image.draw(&mut display.color_converted()) {
+                        error!("draw failed: {e:?}");
+                        continue;
+                    }
                 }
 
                 let mut dc = display.color_converted();
 
-                // Soup HP bar (red, top).
+                // Soup HP bar (red, vertical).
                 if let Err(e) = draw_bar(
                     &mut dc,
-                    HP_BAR_X,
-                    SOUP_HP_Y,
-                    HP_BAR_W,
-                    HP_BAR_H,
+                    SOUP_HP_X,
+                    HUD_BAR_Y,
+                    HUD_BAR_W,
+                    HUD_BAR_H,
                     soup_hp,
                     100,
                     Rgb565::RED,
@@ -262,13 +287,13 @@ pub async fn display_task(
                     continue;
                 }
 
-                // Player HP bar (green).
+                // Player HP bar (green, vertical).
                 if let Err(e) = draw_bar(
                     &mut dc,
-                    HP_BAR_X,
-                    PLAYER_HP_Y,
-                    HP_BAR_W,
-                    HP_BAR_H,
+                    PLAYER_HP_X,
+                    HUD_BAR_Y,
+                    HUD_BAR_W,
+                    HUD_BAR_H,
                     player_hp,
                     100,
                     Rgb565::GREEN,
@@ -278,13 +303,13 @@ pub async fn display_task(
                     continue;
                 }
 
-                // Sweet-spot hold progress bar (yellow).
+                // Sweet-spot hold progress bar (yellow, vertical).
                 if let Err(e) = draw_bar(
                     &mut dc,
-                    HP_BAR_X,
-                    PROGRESS_Y,
-                    HP_BAR_W,
-                    HP_BAR_H,
+                    PROGRESS_X,
+                    HUD_BAR_Y,
+                    HUD_BAR_W,
+                    HUD_BAR_H,
                     sweet_spot_progress,
                     SWEET_SPOT_HOLD_MS,
                     Rgb565::YELLOW,
@@ -301,25 +326,20 @@ pub async fn display_task(
                     error!("draw failed: {e:?}");
                     continue;
                 }
-
-                // DEBUG: live loadcell reading.
-                let mut dbg: String<16> = String::new();
-                write!(&mut dbg, "LC: {}", loadcell_reading).ok();
-                let dbg_text = Text::new(&dbg, Point::new(5, 115), TEXT_STYLE);
-                if let Err(e) = dbg_text.draw(&mut dc) {
-                    error!("draw failed: {e:?}");
-                    continue;
-                }
             }
             AppState::EndScreen { player_won } => {
-                let soup_image = if player_won { &soup_sad } else { &soup_angry };
+                let soup_image = if player_won {
+                    &soup_angry
+                } else {
+                    &soup_neutral
+                };
                 let soup_image = Image::new(soup_image, soup_offset);
                 if let Err(e) = soup_image.draw(&mut display.color_converted()) {
                     error!("draw failed: {e:?}");
                     continue;
                 }
                 let msg = if player_won { "You win!" } else { "You lose!" };
-                let end_text = Text::new(msg, Point::new(60, 30), TEXT_STYLE);
+                let end_text = Text::new(msg, Point::new(70, 80), TEXT_STYLE);
                 if let Err(e) = end_text.draw(&mut display.color_converted()) {
                     error!("draw failed: {e:?}");
                     continue;

@@ -1,5 +1,5 @@
 /// Visual mood of the soup, selected by the display task based on game state.
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SoupStatus {
     Angry,
     Sad,
