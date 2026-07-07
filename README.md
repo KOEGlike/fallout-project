@@ -25,6 +25,8 @@ This project was made for Hackclub's Fallout hackathon
 
 <img width="1188" height="404" alt="image" src="https://github.com/user-attachments/assets/30ab6e45-bfd5-4110-8def-42a948942d48" />
 
+## youtbe demo-video link: https://youtu.be/aj9khr2M_No?si=UUghIB6EbYHTWGHe
+
 
 
 
